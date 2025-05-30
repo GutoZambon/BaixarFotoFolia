@@ -1,0 +1,72 @@
+import os
+import shutil
+from PIL import Image
+import torch
+from transformers import CLIPProcessor, CLIPModel
+from ultralytics import YOLO
+
+# Diretórios
+ROOT_DIR = r'C:\Users\donza\OneDrive\Python\BaixarFotoFolia\fotos_fotofolia'
+METAIS_DIR = os.path.join(ROOT_DIR, 'Metais')
+os.makedirs(METAIS_DIR, exist_ok=True)
+
+# Inicializa CLIP
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+
+# Inicializa YOLOv8 (modelo base)
+yolo_model = YOLO('yolov8n.pt')
+
+# Palavras-chave
+CLIP_PROMPTS = ["trombone", "trompete", "tuba", "saxofone", "instrumento de sopro", "banda de metais"]
+YOLO_KEYWORDS = ["trumpet", "trombone", "saxophone", "tuba"]
+
+# Função: verifica com CLIP
+def is_metal_clip(image):
+    inputs = clip_processor(text=CLIP_PROMPTS, images=image, return_tensors="pt", padding=True)
+    with torch.no_grad():
+        outputs = clip_model(**inputs)
+    logits_per_image = outputs.logits_per_image
+    probs = logits_per_image.softmax(dim=1)
+    confidence, idx = torch.max(probs, dim=1)
+    label = CLIP_PROMPTS[idx]
+    print(f"    [CLIP] {label} ({confidence.item():.2f})")
+    return confidence.item() > 0.25  # ajustável
+
+# Função: verifica com YOLO
+def is_metal_yolo(image_path):
+    results = yolo_model(image_path)[0]
+    for result in results.boxes.data:
+        cls_id = int(result[-1].item())
+        label = yolo_model.names[cls_id].lower()
+        if any(keyword in label for keyword in YOLO_KEYWORDS):
+            print(f"    [YOLO] Encontrado: {label}")
+            return True
+    return False
+
+# Loop pelas imagens
+for root, dirs, files in os.walk(ROOT_DIR):
+    if root == METAIS_DIR:
+        continue
+
+    for file in files:
+        if file.lower().endswith(('.jpg', '.jpeg', '.png')):
+            image_path = os.path.join(root, file)
+            folder_name = os.path.basename(root)
+            try:
+                img = Image.open(image_path).convert("RGB")
+
+                # Verifica com os dois modelos
+                match_clip = is_metal_clip(img)
+                match_yolo = is_metal_yolo(image_path)
+
+                if match_clip or match_yolo:
+                    new_name = f"{folder_name}_{file}"
+                    destino = os.path.join(METAIS_DIR, new_name)
+                    shutil.move(image_path, destino)
+                    print(f"[METAIS] {file} ➜ {new_name}")
+                else:
+                    print(f"[OUTRO ] {file}")
+
+            except Exception as e:
+                print(f"Erro com {file}: {e}")
