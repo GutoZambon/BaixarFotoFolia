@@ -1,0 +1,58 @@
+import os
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+
+BASE_URL = 'https://fotofolia.com.br/2025'
+BASE_DOMAIN = 'https://fotofolia.com.br'
+
+# Pasta onde as imagens serão salvas
+IMAGES_DIR = 'fotos_fotofolia'
+os.makedirs(IMAGES_DIR, exist_ok=True)
+
+# Função para baixar imagem
+def download_image(img_url, folder):
+    try:
+        filename = os.path.basename(urlparse(img_url).path)
+        filepath = os.path.join(folder, filename)
+        if not os.path.exists(filepath):
+            r = requests.get(img_url, stream=True)
+            if r.status_code == 200:
+                with open(filepath, 'wb') as f:
+                    for chunk in r.iter_content(1024):
+                        f.write(chunk)
+                print(f"Imagem salva: {filepath}")
+            else:
+                print(f"Erro ao baixar {img_url}")
+        else:
+            print(f"Imagem já existe: {filepath}")
+    except Exception as e:
+        print(f"Erro ao processar {img_url}: {e}")
+
+# Pega o conteúdo da página principal
+response = requests.get(BASE_URL)
+soup = BeautifulSoup(response.text, 'html.parser')
+
+# Encontra todos os links das galerias
+project_links = [a['href'] for a in soup.find_all('a', class_='project-cover') if a['href'].startswith('/')]
+
+# Visita cada galeria
+for link in project_links:
+    full_url = urljoin(BASE_DOMAIN, link)
+    print(f"\nAcessando galeria: {full_url}")
+    page = requests.get(full_url)
+    galeria = BeautifulSoup(page.text, 'html.parser')
+
+    # Cria pasta para essa galeria
+    nome_galeria = link.strip('/').replace('/', '_')
+    galeria_folder = os.path.join(IMAGES_DIR, nome_galeria)
+    os.makedirs(galeria_folder, exist_ok=True)
+
+    # Procura imagens por data-src ou src
+    for img_tag in galeria.find_all('img'):
+        src = img_tag.get('data-src') or img_tag.get('src')
+        if src and src.startswith('https://cdn.myportfolio.com'):
+            if not os.path.exists(os.path.join(galeria_folder, os.path.basename(urlparse(src).path))):
+                download_image(src, galeria_folder)
+            else:
+                print(f"Imagem já existe: {os.path.join(galeria_folder, os.path.basename(urlparse(src).path))}")
